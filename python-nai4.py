@@ -297,7 +297,7 @@ async def n4(prompt, zip_file, filename):
 async def nai4(tag):
     tag, log = await replace_wildcards(tag)
     filename = f"{random_str()}.png"
-    #print(f"发起nai4绘画请求|prompt:{tag}")
+    print(f"发起nai4绘画请求|prompt:{tag}")
 
     retries_left = 50
     while retries_left > 0:
@@ -318,12 +318,10 @@ async def nai4(tag):
             return
         except Exception as e:
             retries_left -= 1
-            #print(f"nai4报错{e}，剩余尝试次数：{retries_left}")
             if retries_left == 0:
                 print(f"nai4画图失败{e}", True)
 
 async def naiDraw4(tag = '<wd1:artist=1>'):
-    #print('正在进行nai4画图')
     await nai4(tag)
 
 async def main():
