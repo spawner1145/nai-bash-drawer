@@ -185,7 +185,7 @@ async def get_available_wildcards(wildcards_relative_path=''):
         print("An error occurred while scanning the directory:", e)
         return "无wildcard"
 
-async def n4(prompt, zip_file, filename):
+async def n3(prompt, zip_file, filename):
     global round_nai
     
     # 随机选择一组分辨率
@@ -279,16 +279,16 @@ async def n4(prompt, zip_file, filename):
             zip_file.writestr(filename, image_data)
     return filename
 
-async def nai4(tag):
+async def nai3(tag):
     tag, log = await replace_wildcards(tag)
     filename = f"{random_str()}.png"
-    #print(f"发起nai4绘画请求|prompt:{tag}")
+    print(f"发起nai3绘画请求|prompt:{tag}")
 
     retries_left = 50
     while retries_left > 0:
         try:
             with zipfile.ZipFile(zip_path, 'a') as zf:
-                generated_filename = await n4(tag, zf, filename)
+                generated_filename = await n3(tag, zf, filename)
             
             header = ['filename', 'tags']
             data = [generated_filename, tag]
@@ -303,17 +303,15 @@ async def nai4(tag):
             return
         except Exception as e:
             retries_left -= 1
-            #print(f"nai4报错{e}，剩余尝试次数：{retries_left}")
             if retries_left == 0:
-                print(f"nai4画图失败{e}", True)
+                print(f"nai3画图失败{e}", True)
 
-async def naiDraw4(tag = '<wd1:artist=1>'):
-    #print('正在进行nai4画图')
-    await nai4(tag)
+async def naiDraw3(tag = '<wd1:artist=1>'):
+    await nai3(tag)
 
 async def main():
     while True:
-        asyncio.create_task(naiDraw4(AAA_tags))
+        asyncio.create_task(naiDraw3(AAA_tags))
         await asyncio.sleep(interval)
 
 if __name__ == "__main__":
