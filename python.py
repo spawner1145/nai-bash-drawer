@@ -34,6 +34,9 @@ csv_path = '/kaggle/working/train.csv'
 # 输出images图片压缩包的路径
 zip_path = "/kaggle/working/images.zip"
 
+# 代理
+proxy = '' # 如用clash填'http://127.0.0.1:7890'
+
 # 从第几个key开始轮询(0是第一个)
 round_nai = 0
 
@@ -271,7 +274,11 @@ async def n4(prompt, zip_file, filename):
     list_length = len(key_list)
     if round_nai >= list_length:
         round_nai = 0
-    async with httpx.AsyncClient(timeout=1000) as client:
+    if proxy:
+        proxies = {"http://": proxy, "https://": proxy}
+    else:
+        proxies = None
+    async with httpx.AsyncClient(timeout=1000, proxies=proxies) as client:
         response = await client.post(url=f'{url}/ai/generate-image', json=payload, headers=headers)
         response.raise_for_status()
         zip_content = response.content
