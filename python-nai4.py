@@ -14,37 +14,7 @@ from io import BytesIO
 import csv
 import string
 
-# key列表(用于轮询)
-key_list = [
-    '',
-]
-
-# 请求提示词
-AAA_tags = '<wd1:artist_full=1>'
-
-# 间隔请求时间(秒)
-interval = 1 
-
-# 定义全局变量 wildcard 文件夹的路径
-WILDCARDS_DIR = '/kaggle/input/artists'
-
-# 输出train.csv的路径
-csv_path = '/kaggle/working/train.csv'
-
-# 输出images图片压缩包的路径
-zip_path = "/kaggle/working/images.zip"
-
-# 代理
-proxy = '' # 如用clash填'http://127.0.0.1:7890'
-
-# 从第几个key开始轮询(0是第一个)
-round_nai = 0
-
-# 默认预设(其中’{}‘代表请求提示词会替换的位置)
-positives = '{},rating:general, best quality, very aesthetic, absurdres'
-negatives = 'blurry, lowres, error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, logo, dated, signature, multiple views, gigantic breasts'
-
-def random_str(length=32):
+async def random_str(length=32):
     valid_chars = string.ascii_letters + string.digits
     return ''.join(random.choice(valid_chars) for _ in range(length))
 
@@ -52,7 +22,7 @@ async def get_random_lines(file_path, count):
     async with aiofiles.open(file_path, 'r', encoding='utf-8') as file:
         lines = [line.strip() async for line in file if line.strip()]
         if not lines:
-            raise ValueError(f"No content found in {file_path}")
+            raise ValueError(f"文件 {file_path} 没有内容")
         return [random.choice(lines) for _ in range(min(count, len(lines)))]
 
 def add_weight(item, weight_type, a=1.0, b=None):
@@ -61,12 +31,8 @@ def add_weight(item, weight_type, a=1.0, b=None):
     elif weight_type == 'range' and b is not None:
         n = round(random.uniform(a, b), 4)
     else:
-        raise ValueError("Invalid weight type or parameters")
-
-    if n == 1.0:
-        return item
-    else:
-        return f"({item}:{n})"
+        raise ValueError("无效的权重类型或参数")
+    return item if n == 1.0 else f"({item}:{n})"
 
 def parse_weight_params(weight_str):
     try:
@@ -74,27 +40,23 @@ def parse_weight_params(weight_str):
             warning_msg = "无效的权重参数 ''，使用默认权重 0 到 1."
             print(warning_msg)
             return 'range', 0.0, 1.0, warning_msg
-
         weight_str = weight_str.replace('wd', '', 1)
-
         try:
             a = float(weight_str)
             return 'fixed', a, None, None
         except ValueError:
             pass
-
         if '-' in weight_str:
             a, b = map(float, weight_str.split('-'))
             if a <= b:
                 return 'range', a, b, None
             else:
-                raise ValueError("Invalid weight range: start must be less than or equal to end.")
-
+                raise ValueError("权重范围无效：开始值必须小于或等于结束值")
         warning_msg = f"无效的权重参数 '{weight_str}'，使用默认权重 0 到 1."
         print(warning_msg)
         return 'range', 0.0, 1.0, warning_msg
     except (ValueError, TypeError) as e:
-        warning_msg = f"无效的权重参数 '{weight_str}'，使用默认权重 0 到 1. 错误信息: {e}"
+        warning_msg = f"无效的权重参数 '{weight_str}'，使用默认权重 0 到 1. 错误: {e}"
         print(warning_msg)
         return 'range', 0.0, 1.0, warning_msg
 
@@ -102,25 +64,19 @@ async def replace_wildcards(input_string, wildcards_relative_path=''):
     pattern = re.compile(r'<(wd[^:]*):([a-zA-Z0-9_]+)(?:=([0-9]+))?>')
     wildcards_dir = os.path.join(WILDCARDS_DIR, wildcards_relative_path)
     if not os.path.isdir(wildcards_dir):
-        raise NotADirectoryError(f"The directory does not exist: {wildcards_dir}")
-
+        raise NotADirectoryError(f"目录不存在: {wildcards_dir}")
     matches = list(pattern.finditer(input_string))
     replacement_tasks = []
-
     for match in matches:
         weight_part, wildcard_name, num_lines_str = match.groups()
         file_path = os.path.join(wildcards_dir, f'{wildcard_name}.txt')
-
         async def process_match(match, weight_part, file_path, num_lines_str=None):
             if not os.path.isfile(file_path):
                 return match.group(0), None, None
-
             try:
                 num_lines = int(num_lines_str) if num_lines_str else 1
                 weight_type, a, b, log_entry = parse_weight_params(weight_part)
-
                 selected_items = await get_random_lines(file_path, num_lines)
-
                 replaced_items = []
                 for item in selected_items:
                     if weight_type == 'fixed':
@@ -128,23 +84,19 @@ async def replace_wildcards(input_string, wildcards_relative_path=''):
                     elif weight_type == 'range':
                         replaced_item = add_weight(item, 'range', a=a, b=b)
                     else:
-                        raise ValueError("Invalid weight type")
-
+                        raise ValueError("无效的权重类型")
                     replaced_items.append(replaced_item)
-
                 replaced_str = ','.join(replaced_items)
                 return replaced_str, f"{match.group(0)} -> {replaced_str}", log_entry
             except (ValueError, TypeError) as e:
-                error_msg = f"Invalid number of lines or weight parameters: {e}"
+                error_msg = f"无效的行数或权重参数: {e}"
                 print(error_msg)
                 return match.group(0), None, error_msg
             except Exception as e:
-                error_msg = f"Unexpected error: {e}"
+                error_msg = f"意外错误: {e}"
                 print(error_msg)
                 return match.group(0), None, error_msg
-
         replacement_tasks.append(process_match(match, weight_part, file_path, num_lines_str))
-
     replacements = await asyncio.gather(*replacement_tasks)
     parts = []
     last_end = 0
@@ -153,8 +105,7 @@ async def replace_wildcards(input_string, wildcards_relative_path=''):
         parts.append(input_string[last_end:match.start()])
         new_str, log_entry, weight_log = replacements[i]
         if log_entry and weight_log:
-            combined_log = f"{log_entry}, {weight_log}"
-            replacement_log.append(combined_log)
+            replacement_log.append(f"{log_entry}, {weight_log}")
         elif log_entry:
             replacement_log.append(log_entry)
         elif weight_log:
@@ -170,38 +121,22 @@ async def get_available_wildcards(wildcards_relative_path=''):
     wildcards_dir = os.path.join(WILDCARDS_DIR, wildcards_relative_path)
     if not os.path.isdir(wildcards_dir):
         return "无wildcard"
-    
     try:
-        available_files = []
-        for entry in os.scandir(wildcards_dir):
-            if entry.is_file() and entry.name.endswith('.txt'):
-                available_files.append(entry.name)
+        available_files = [entry.name for entry in os.scandir(wildcards_dir) if entry.is_file() and entry.name.endswith('.txt')]
         if not available_files:
             return "无wildcard"
         wildcard_strings = [f"<wd1:{os.path.splitext(f)[0]}=1>" for f in available_files]
-        result_string = '\n'.join(wildcard_strings)
-        return result_string
+        return '\n'.join(wildcard_strings)
     except Exception as e:
-        print("An error occurred while scanning the directory:", e)
+        print(f"扫描目录时出错: {e}")
         return "无wildcard"
 
-async def n4(prompt, zip_file, filename):
+async def n4(prompt, output_type, output_dir, zip_file, filename):
     global round_nai
-    
-    # 随机选择一组分辨率
-    resolutions = [
-        (1024, 1024),  # 方形
-        (1216, 832),   # 横向
-        (832, 1216)    # 纵向
-    ]
+    resolutions = [(1024, 1024), (1216, 832), (832, 1216)]
     width, height = random.choice(resolutions)
-    
     url = "https://image.novelai.net"
-
-    positive = positives
-    negative = negatives
-    positive = (("{}," + positive) if "{}" not in positive else positive).replace("{}", prompt) if isinstance(positive, str) else str(prompt)
-
+    positive = positives.format(prompt) if "{}" in positives else f"{prompt},{positives}"
     payload = {
         "input": positive,
         "model": "nai-diffusion-4-curated-preview",
@@ -228,20 +163,12 @@ async def n4(prompt, zip_file, filename):
             "seed": random.randint(0, 2 ** 32 - 1),
             "characterPrompts": [],
             "v4_prompt": {
-                "caption": {
-                    "base_caption": positive,
-                    "char_captions": []
-                },
+                "caption": {"base_caption": positive, "char_captions": []},
                 "use_coords": False,
                 "use_order": True
             },
-            "v4_negative_prompt": {
-                "caption": {
-                    "base_caption": negative,
-                    "char_captions": []
-                }
-            },
-            "negative_prompt": negative,
+            "v4_negative_prompt": {"caption": {"base_caption": negatives, "char_captions": []}},
+            "negative_prompt": negatives,
             "reference_image_multiple": [],
             "reference_information_extracted_multiple": [],
             "reference_strength_multiple": [],
@@ -249,7 +176,6 @@ async def n4(prompt, zip_file, filename):
             "prefer_brownian": True
         }
     }
-
     headers = {
         "Authorization": f"Bearer {key_list[int(round_nai)]}",
         "accept": "*/*",
@@ -270,41 +196,37 @@ async def n4(prompt, zip_file, filename):
         "x-correlation-id": "89SHW4",
         "x-initiated-at": "2025-01-27T16:40:54.521Z"
     }
-    round_nai += 1
-    list_length = len(key_list)
-    if round_nai >= list_length:
-        round_nai = 0
-    if proxy:
-        proxies = {"http://": proxy, "https://": proxy}
-    else:
-        proxies = None
+    round_nai = (round_nai + 1) % len(key_list)
+    proxies = {"http://": proxy, "https://": proxy} if proxy else None
     async with httpx.AsyncClient(timeout=1000, proxies=proxies) as client:
-        response = await client.post(url=f'{url}/ai/generate-image', json=payload, headers=headers)
+        response = await client.post(f'{url}/ai/generate-image', json=payload, headers=headers)
         response.raise_for_status()
         zip_content = response.content
         zip_file_inner = io.BytesIO(zip_content)
         with zipfile.ZipFile(zip_file_inner, 'r') as zf:
             file_names = zf.namelist()
             if not file_names:
-                raise ValueError("The zip archive is empty.")
+                raise ValueError("压缩包为空")
             file_name = file_names[0]
             if not file_name.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp')):
-                raise ValueError("The zip archive does not contain an image file.")
+                raise ValueError("压缩包不包含图片文件")
             image_data = zf.read(file_name)
-            zip_file.writestr(filename, image_data)
+            if output_type == 'zip':
+                zip_file.writestr(filename, image_data)
+            elif output_type == 'folder':
+                os.makedirs(output_dir, exist_ok=True)
+                with open(os.path.join(output_dir, filename), 'wb') as f:
+                    f.write(image_data)
     return filename
 
-async def nai4(tag):
+async def nai4(tag, output_type, output_dir, zip_file):
     tag, log = await replace_wildcards(tag)
-    filename = f"{random_str()}.png"
-    print(f"发起nai4绘画请求|prompt:{tag}")
-
+    filename = f"{await random_str()}.png"
+    print(f"发起绘画请求 | prompt: {tag}")
     retries_left = 50
     while retries_left > 0:
         try:
-            with zipfile.ZipFile(zip_path, 'a') as zf:
-                generated_filename = await n4(tag, zf, filename)
-            
+            generated_filename = await n4(tag, output_type, output_dir, zip_file, filename)
             header = ['filename', 'tags']
             data = [generated_filename, tag]
             file_exists = os.path.isfile(csv_path)
@@ -313,21 +235,65 @@ async def nai4(tag):
                 if not file_exists:
                     writer.writerow(header)
                 writer.writerow(data)
-                
-            print(f"成功写入CSV文件 | filename: {generated_filename}, tag: {tag}")
+            print(f"成功写入CSV | filename: {generated_filename}, tag: {tag}")
             return
         except Exception as e:
             retries_left -= 1
             if retries_left == 0:
-                print(f"nai4画图失败{e}", True)
-
-async def naiDraw4(tag = '<wd1:artist=1>'):
-    await nai4(tag)
+                print(f"绘画失败: {e}")
 
 async def main():
-    while True:
-        asyncio.create_task(naiDraw4(AAA_tags))
-        await asyncio.sleep(interval)
+    if OUTPUT_TYPE == 'folder' and not os.path.exists(OUTPUT_DIR):
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+    zip_file = zipfile.ZipFile(zip_path, 'a') if OUTPUT_TYPE == 'zip' else None
+    try:
+        for _ in range(NUM_IMAGES):
+            await nai4(AAA_TAGS, OUTPUT_TYPE, OUTPUT_DIR, zip_file)
+            await asyncio.sleep(INTERVAL)
+    finally:
+        if zip_file:
+            zip_file.close()
+
+# ==================== 可配置参数 ====================
+# API密钥列表（用于轮询）
+KEY_LIST = ['']  # 请填入你的NovelAI API密钥
+
+# 请求提示词
+AAA_TAGS = '<wd1:artist_full=1>'  # 提示词模板，可使用wildcard
+
+# 每次请求的间隔时间（秒）
+INTERVAL = 1
+
+# wildcard文件夹路径
+WILDCARDS_DIR = '/kaggle/input/artists'
+
+# 输出train.csv的路径
+CSV_PATH = '/kaggle/working/train.csv'
+
+# 输出类型：'zip' 表示输出到压缩包，'folder' 表示输出到文件夹
+OUTPUT_TYPE = 'zip'  # 可选值：'zip' 或 'folder'
+
+# 如果 OUTPUT_TYPE 为 'zip'，图片将保存到此压缩包
+ZIP_PATH = '/kaggle/working/images.zip'
+
+# 如果 OUTPUT_TYPE 为 'folder'，图片将保存到此文件夹
+OUTPUT_DIR = '/kaggle/working/images'
+
+# 生成的图片数量
+NUM_IMAGES = 1  # 设置生成图片的数量
+
+# 代理设置（如果需要）
+PROXY = ''  # 例如：'http://127.0.0.1:7890'，不需要则留空
+
+# 从第几个key开始轮询（0是第一个）
+ROUND_NAI = 0
+
+# 正向提示词模板（{}会被提示词替换）
+POSITIVES = '{},rating:general, best quality, very aesthetic, absurdres'
+
+# 负向提示词
+NEGATIVES = 'blurry, lowres, error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, logo, dated, signature, multiple views, gigantic breasts'
+# ================================================
 
 if __name__ == "__main__":
     asyncio.run(main())
